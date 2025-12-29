@@ -66,12 +66,17 @@ tasks:
       - task: py-init
       - task: web-init
 
+  py-format:
+    desc: Format Python code
+    cmds:
+      - uv run ruff format
+
   run-marimo:
     desc: Run marimo
     cmds:
       - uv run marimo run {{.FILEPATH}}
 
-  py-format:
-    desc: Format Python code
+  py-run:
+    desc: Run Python code
     cmds:
-      - uv run ruff format
+      - uv run python3 -m main

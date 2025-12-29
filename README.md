@@ -10,6 +10,13 @@ This approach is inspired by Donald Knuth's Literate Programming but updated for
 
 ## Story
 
+This is the story of how a hero goes about creating a magic spell able to conquer the treacherous world known as leetcode.
+
+Our hero forges a console to navigate the realm of code.
+Each command is a spell, each file a quest.
+The console narrates progress, guards against confusion,
+and ensures that every journey begins and ends with clarity.
+
 - [ ] TODO: ordinary world: Establish setting, characters (users, system), status quo.
 - [ ] TODO: call to adventure: The problem/opportunity disrupts the status quo.
 - [ ] TODO: (Often within Call to Adventure): Hesitation, fear, or initial failed solutions.
@@ -23,3 +30,13 @@ This approach is inspired by Donald Knuth's Literate Programming but updated for
 - [ ] TODO: (Often fused with Ordeal): Final test that proves the hero/solution has truly changed.
 - [ ] TODO: return home: Solution is integrated; the world is improved; lessons are shared.
 - [ ] TODO: new normal: Solution is integrated; the world is improved; lessons are shared.
+
+## Story Framework
+
+Inspired by literate programming (LP)
+
+1. Narrate before coding “What does the reader need to understand next?” Keeps code readable.
+2. Separate the actors “Who is responsible for this task?” Simplifies extension later.
+3. Write one clear invariant per function “What must always be true?” Gives you correctness tests.
+4. Design the UX for delight “What will make this satisfying to run?” Keeps motivation high.
+5. Treat the CLI as your lab notebook “Can future-me replay this?” Builds reproducibility.
