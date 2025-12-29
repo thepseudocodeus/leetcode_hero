@@ -4,14 +4,14 @@ Interactive CLI for LeetCode Hero
 
 Notes:
 """
+
 import typer
 from InquirerPy import inquirer
-from rich.progress import track
 
-from core import FILE_STATE, update_state, current_state, list_project_files
-from persistence import save_index
-from actions import run_with_marimo, open_in_vscode, print_contents
-from types import CLIState
+from scripts.do import open_in_vscode, print_contents, run_with_marimo
+from scripts.logic import FILE_STATE, current_state, list_project_files, update_state
+from scripts.store import save_index
+from scripts.mytypes import CLIState
 
 app = typer.Typer(help="🎮  LeetCode Hero: interactive CLI")
 

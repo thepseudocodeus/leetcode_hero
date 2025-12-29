@@ -4,6 +4,7 @@ Actions for CLI
 
 Notes:
 """
+
 import subprocess
 from pathlib import Path
 from rich.console import Console

@@ -25,6 +25,17 @@ tasks:
       - uv add -r requirements.txt
       - uv sync
 
+  py-refresh:
+    desc: Refresh Python environment
+    cmds:
+      - uv clean
+      - find . -name "__pycache__" -type d -exec rm -rf {} +
+      - find . -name ".mypy_cache" -type d -exec rm -rf {} +
+      - find . -name ".pytest_cache" -type d -exec rm -rf {} +
+      - find . -name ".ruff_cache" -type d -exec rm -rf {} +
+      - find . -name "*.pyc" -delete
+      - uv sync
+
   story-init:
     desc: Create the story environment for this product
     cmds:
@@ -76,7 +87,7 @@ tasks:
     cmds:
       - uv run marimo run {{.FILEPATH}}
 
-  py-run:
+  pyr:
     desc: Run Python code
     cmds:
-      - uv run python3 -m main
+      - uv run --reload python3 -m main
