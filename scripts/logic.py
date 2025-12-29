@@ -75,6 +75,8 @@ def build_index(force: bool = False) -> list[Path]:
             prev_hashes[str(f)] = new_hash
             changed.append(f)
 
+    files = [p for p in files if str(p.parent)[0] != "."]
+
     FILE_STATE.files = files
     FILE_STATE.dirs = sorted({p.parent for p in files})
     FILE_STATE.hashes = prev_hashes

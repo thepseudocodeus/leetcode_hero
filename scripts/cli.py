@@ -75,7 +75,7 @@ def menu_index_files():
     else:
         console.print("[yellow]Index is already up-to-date![/yellow]")
 
-    update_state(CLIState.MAIN_MENU)
+    # update_state(CLIState.INDEXING)
 
 
 def menu_file_selection():
