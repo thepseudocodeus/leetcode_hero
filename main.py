@@ -13,6 +13,7 @@ Features:
 Notes:
 - Draft of my story-driven development method inspired by Literate Programming (LP).
 - Use of hashing inspired by Linux OS installation procedures where check downloaded hash against expected hash.
+- Inspired by elm for this as well.
 """
 
 # IMPORT & SETUP
@@ -30,14 +31,58 @@ from rich.console import Console
 from rich.progress import track
 from tqdm import tqdm
 
-# CLI & console setup
+from typing import Any, Callable, List, Dict
+
+# ----------------------------
+# Setup
+# ----------------------------
 app = typer.Typer(help="🎮  LeetCode Hero: navigate your quests interactively.")
 console = Console()
-
-# FILES & HASH STATE
 INDEX_FILE = Path("./index.parquet")
 HASH_FILE = Path("./file_hashes.json")
 
+# ----------------------------
+# Finite State Machine
+# ----------------------------
+class CLIState:
+    INIT = "INIT"
+    MAIN_MENU = "MAIN_MENU"
+    INDEXING = "INDEXING"
+    FILE_SELECTION = "FILE_SELECTION"
+    ACTION_SELECTION = "ACTION_SELECTION"
+    EXECUTION = "EXECUTION"
+    VIEW_LOGS = "VIEW_LOGS"
+    CONFIGURE = "CONFIGURE"
+    EXIT = "EXIT"
+
+# Valid transitions: state -> list of allowed next states
+ALLOWED_TRANSITIONS = {
+    CLIState.INIT: [CLIState.MAIN_MENU, CLIState.EXIT],
+    CLIState.MAIN_MENU: [
+        CLIState.INDEXING,
+        CLIState.FILE_SELECTION,
+        CLIState.VIEW_LOGS,
+        CLIState.CONFIGURE,
+        CLIState.EXIT,
+    ],
+    CLIState.INDEXING: [CLIState.MAIN_MENU],
+    CLIState.FILE_SELECTION: [CLIState.ACTION_SELECTION, CLIState.MAIN_MENU],
+    CLIState.ACTION_SELECTION: [CLIState.EXECUTION, CLIState.FILE_SELECTION, CLIState.MAIN_MENU],
+    CLIState.EXECUTION: [CLIState.MAIN_MENU],
+    CLIState.VIEW_LOGS: [CLIState.MAIN_MENU],
+    CLIState.CONFIGURE: [CLIState.MAIN_MENU],
+    CLIState.EXIT: [],
+}
+
+current_state = CLIState.INIT
+
+def update_state(new_state: str):
+    global current_state
+    if new_state in ALLOWED_TRANSITIONS[current_state]:
+        current_state = new_state
+        console.print(f"[bold cyan]State updated → {current_state}[/bold cyan]")
+    else:
+        console.print(f"[red]Invalid transition: {current_state} → {new_state}[/red]")
 
 # =============================
 # Stage 1 – Helpers for indexing
