@@ -1,19 +1,18 @@
 # scripts/store.py
 """
-Utilities for storing state
-
-Notes:
-"""
-# scripts/store.py
-"""
+🎮 LeetCode Hero: Story-driven Interactive CLI
 Utilities for storing state using Polars with quantitative metrics.
+
+- [ ] TODO: is there a way to confirm with a dry run prior to executing?
 """
 
 import json
-from itertools import zip_longest
+from itertools import islice, zip_longest
 from pathlib import Path
 
 import polars as pl
+import pyarrow as pa
+import pyarrow.parquet as pq
 
 from .mytypes import FileState
 
@@ -22,65 +21,157 @@ HASH_FILE = Path("./file_hashes.json")
 METRICS_FILE = Path("./index_metrics.json")
 
 
-def save_index(file_state: FileState, chunk_size: int = 10000) -> None:
-    """Persist file state to disk efficiently and compute top-tier metrics."""
-    # Validate inputs
-    files_len = len(file_state.files)
-    dirs_len = len(file_state.dirs)
-    hashes_len = len(file_state.hashes)
-    max_len = max(files_len, dirs_len, hashes_len)
-    min_len = min(files_len, dirs_len, hashes_len)
-    if max_len / max(1, min_len) > 10:
-        print(f"⚠️ Warning: input lengths differ significantly: {files_len}, {dirs_len}, {hashes_len}")
+def _chunked(iterable, size=10000):
+    """Yield successive chunks from iterable."""
+    it = iter(iterable)
+    while True:
+        chunk = list(islice(it, size))
+        if not chunk:
+            break
+        yield chunk
 
-    # Row-wise combination using generator
-    rows_gen = zip_longest(file_state.files, file_state.dirs, file_state.hashes.values(), fillvalue=None)
 
-    # Chunked, memory-efficient Polars DataFrame
-    df = pl.from_records(rows_gen, schema=["files", "dirs", "hashes"], chunk_size=chunk_size)
+def preflight_index(file_state: FileState, chunk_size: int = 1000):
+    """
+    Simulate save_index to detect potential errors without writing.
+    Returns: success (bool), message (str), chunk_index (int or None)
+    """
+    rows_gen = zip_longest(
+        file_state.files, file_state.dirs, file_state.hashes.values(), fillvalue=None
+    )
 
-    # Persist to Parquet (multi-threaded)
-    df.write_parquet(INDEX_FILE, use_pyarrow=True)
+    for i, chunk in enumerate(_chunked(rows_gen, chunk_size)):
+        try:
+            pl.DataFrame(chunk, schema=["files", "dirs", "hashes"])
+        except Exception as e:
+            return False, f"Chunk {i} failed: {e}", i
 
-    # --- Compute expert-level metrics ---
+    return True, "All chunks passed preflight.", None
+
+
+def sanitize(input: FileState) -> FileState:
+    fs = [str(f) for f in input.files]
+    ds = [str(d) for d in input.dirs]
+    input.files = fs
+    input.dirs = ds
+    return input
+
+
+def save_index(
+    file_state: FileState, chunk_size: int = 10000, preflight: bool = True
+) -> None:
+    """
+    Persist file state incrementally using PyArrow.
+    Optionally run preflight to catch errors before writing.
+    """
+    # get rid of annoying type conversion issues
+    file_state = sanitize(file_state)
+    if preflight:
+        ok, msg, chunk = preflight_index(file_state, chunk_size)
+        if not ok:
+            raise ValueError(f"Preflight failed at chunk {chunk}: {msg}")
+        else:
+            print("Preflight check passed — proceeding to save.")
+
+    rows_gen = zip_longest(
+        file_state.files, file_state.dirs, file_state.hashes.values(), fillvalue=None
+    )
+
+    # - [ ] TODO: add a data converter for arrow here
+
+    # PyArrow chunked write
+    writer = None
+    for chunk in _chunked(rows_gen, chunk_size):
+        df_chunk = pl.DataFrame(chunk, schema=["files", "dirs", "hashes"])
+        # df_chunk = df_chunk.with_columns(
+        #     [
+        #         pl.col("files").apply(lambda x: str(x) if x is not None else None),
+        #         pl.col("dirs").apply(lambda x: str(x) if x is not None else None),
+        #     ]
+        # )
+        # switched to utf-8 to avoid polars type mismatches
+        df_chunk = df_chunk.with_columns(
+            [
+                pl.col("files").cast(pl.Utf8),
+                pl.col("dirs").cast(pl.Utf8),
+            ]
+        )
+        # table = pa.Table.from_pandas(df_chunk.to_pandas())
+        table = pa.Table.from_pandas(
+            df_chunk.to_pandas(),
+            schema=pa.schema(
+                [("files", pa.string()), ("dirs", pa.string()), ("hashes", pa.string())]
+            ),
+        )
+        if writer is None:
+            writer = pq.ParquetWriter(INDEX_FILE, table.schema, compression="ZSTD")
+        writer.write_table(table)
+    if writer:
+        writer.close()
+
+    # Polars lazy read
+    df_lazy = pl.scan_parquet(INDEX_FILE)
+
     metrics = {}
+    metrics["num_files"] = df_lazy.select(
+        pl.col("files").drop_nulls().count()
+    ).collect()[0, 0]
+    metrics["num_dirs"] = df_lazy.select(
+        pl.col("dirs").drop_nulls().n_unique()
+    ).collect()[0, 0]
+    metrics["num_hashes"] = df_lazy.select(
+        pl.col("hashes").drop_nulls().count()
+    ).collect()[0, 0]
 
-    # General counts
-    metrics["num_files"] = df["files"].drop_nulls().count()
-    metrics["num_dirs"] = df["dirs"].drop_nulls().unique().count()
-    metrics["num_hashes"] = df["hashes"].drop_nulls().count()
-
-    # File-per-dir distribution
+    # Files-per-dir statistics
     if metrics["num_dirs"] > 0:
-        fpd = df.groupby("dirs").agg(pl.count("files").alias("files_per_dir"))["files_per_dir"]
-        metrics.update({
-            "files_per_dir_mean": fpd.mean(),
-            "files_per_dir_median": fpd.median(),
-            "files_per_dir_std": fpd.std(),
-            "files_per_dir_min": fpd.min(),
-            "files_per_dir_max": fpd.max(),
-            "files_per_dir_skew": fpd.skew(),
-            "files_per_dir_kurtosis": fpd.kurtosis(),
-        })
+        fpd = df_lazy.groupby("dirs").agg(pl.count("files").alias("files_per_dir"))[
+            "files_per_dir"
+        ]
+        fpd_metrics = (
+            fpd.select(
+                [
+                    pl.col("files_per_dir").mean(),
+                    pl.col("files_per_dir").median(),
+                    pl.col("files_per_dir").std(),
+                    pl.col("files_per_dir").min(),
+                    pl.col("files_per_dir").max(),
+                    pl.col("files_per_dir").skew(),
+                    pl.col("files_per_dir").kurtosis(),
+                ]
+            )
+            .collect()[0]
+            .to_dict()
+        )
+        metrics.update({f"files_per_dir_{k}": v for k, v in fpd_metrics.items()})
 
-    # Hash-length statistics
-    hash_lengths = df["hashes"].str.lengths()
-    metrics.update({
-        "hash_length_mean": hash_lengths.mean(),
-        "hash_length_median": hash_lengths.median(),
-        "hash_length_std": hash_lengths.std(),
-        "hash_length_min": hash_lengths.min(),
-        "hash_length_max": hash_lengths.max(),
-        "hash_length_skew": hash_lengths.skew(),
-        "hash_length_kurtosis": hash_lengths.kurtosis(),
-    })
+    # Hash length statistics
+    hash_len = df_lazy.select(pl.col("hashes").str.lengths().alias("hash_length"))[
+        "hash_length"
+    ]
+    hash_metrics = (
+        hash_len.select(
+            [
+                pl.col("hash_length").mean(),
+                pl.col("hash_length").median(),
+                pl.col("hash_length").std(),
+                pl.col("hash_length").min(),
+                pl.col("hash_length").max(),
+                pl.col("hash_length").skew(),
+                pl.col("hash_length").kurtosis(),
+            ]
+        )
+        .collect()[0]
+        .to_dict()
+    )
+    metrics.update({f"hash_length_{k}": v for k, v in hash_metrics.items()})
 
-    # Save metrics as JSON
+    # Save metrics
     METRICS_FILE.write_text(json.dumps(metrics, indent=2))
 
 
 def load_index() -> FileState:
-    """Load persisted index."""
+    """Load persisted index safely."""
     fs = FileState()
     if INDEX_FILE.exists():
         df = pl.read_parquet(INDEX_FILE)
@@ -91,14 +182,14 @@ def load_index() -> FileState:
 
 
 def load_metrics() -> dict:
-    """Load previously computed metrics, if any."""
+    """Load previously computed metrics."""
     if METRICS_FILE.exists():
         return json.loads(METRICS_FILE.read_text())
     return {}
 
 
 def save_hashes(hashes: dict) -> None:
-    """Save file hashes to JSON for quick diff checking."""
+    """Save file hashes to JSON."""
     HASH_FILE.write_text(json.dumps(hashes, indent=2))
 
 

@@ -25,8 +25,8 @@ class CLIState(str, Enum):
 
 @dataclass
 class FileState:
-    files: List[Path]
-    dirs: List[Path]
+    files: List[Path] | List[str]
+    dirs: List[Path] | List[str]
     hashes: Dict[Path, str]
 
     def __init__(self):

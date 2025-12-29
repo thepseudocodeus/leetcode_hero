@@ -7,27 +7,60 @@ Inspired by Knuth Literate Programming reading.
 Notes:
 """
 
-from pathlib import Path
 from hashlib import sha256
+from pathlib import Path
+from typing import Generator, Iterator
+
 from tqdm import tqdm
 
-from .store import save_index, load_index, save_hashes, load_hashes
 from .mytypes import FileState
+from .store import load_hashes, save_hashes, save_index
 
 FILE_STATE = FileState()
 
 
 def hash_file(path: Path) -> str:
     h = sha256()
+    if path.is_dir():
+        return ""
     h.update(path.read_bytes())
     return h.hexdigest()
 
 
+def validate_files(input: Iterator[Path]) -> Generator[Path, None, None]:
+    exclude_ext = [".md", ".ipynb", ".py", ".toml", ".yaml"]
+    for p in input:
+        if p.is_file() and not p.name.startswith(".") and p.suffix not in exclude_ext:
+            yield p
+
+
+def validate_dirs(input: Iterator[Path]) -> Generator[Path, None, None]:
+    exclude_dirs = [
+        ".venv",
+        "venv",
+        "git",
+        ".git",
+        "node_modules",
+        ".node_modules",
+        "__pycache__",
+        ".mypy_cache",
+        ".pytest_cache",
+        ".ruff_cache",
+    ]
+    for d in input:
+        if d.is_dir() and not d.name.startswith(".") and d.name not in exclude_dirs:
+            yield d
+
+
+def only_valid(input: Iterator[Path]) -> Generator[Path, None, None]:
+    for e in input:
+        if e.is_file() or e.is_dir():
+            yield e
+
+
 def list_project_files(base: Path = Path(".")) -> list[Path]:
     """Return all non-hidden files."""
-    return sorted(
-        p for p in base.rglob("*") if p.is_file() and not p.name.startswith(".")
-    )
+    return sorted(p for p in only_valid(base.rglob("*")))
 
 
 def build_index(force: bool = False) -> list[Path]:

@@ -82,13 +82,13 @@ def menu_file_selection():
     """Select a file and perform an action."""
     update_state(CLIState.FILE_SELECTION)
 
-    if not FILE_STATE["files"]:
+    if not FILE_STATE.files:
         console.print("[red]No files indexed! Run indexing first.[/red]")
         return
 
     file_choice = inquirer.select(
         message="Select a file:",
-        choices=[str(f) for f in FILE_STATE["files"]],
+        choices=[str(f) for f in FILE_STATE.files],
         pointer="🗡️ ",
     ).execute()
 
