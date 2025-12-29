@@ -18,9 +18,9 @@ Notes:
 
 # IMPORT & SETUP
 import hashlib
-import json
 import subprocess
 from pathlib import Path
+from typing import Generator, Iterator, List
 
 import pandas as pd
 import pyarrow as pa
@@ -28,10 +28,7 @@ import pyarrow.parquet as pq
 import typer
 from InquirerPy import inquirer
 from rich.console import Console
-from rich.progress import track
 from tqdm import tqdm
-
-from typing import Any, Callable, List, Dict
 
 # ----------------------------
 # Setup
@@ -40,6 +37,7 @@ app = typer.Typer(help="🎮  LeetCode Hero: navigate your quests interactively.
 console = Console()
 INDEX_FILE = Path("./index.parquet")
 HASH_FILE = Path("./file_hashes.json")
+
 
 # ----------------------------
 # Finite State Machine
@@ -55,7 +53,9 @@ class CLIState:
     CONFIGURE = "CONFIGURE"
     EXIT = "EXIT"
 
+
 # Valid transitions: state -> list of allowed next states
+# Use of lists reduces complexity of conditional approach used previously
 ALLOWED_TRANSITIONS = {
     CLIState.INIT: [CLIState.MAIN_MENU, CLIState.EXIT],
     CLIState.MAIN_MENU: [
@@ -67,7 +67,11 @@ ALLOWED_TRANSITIONS = {
     ],
     CLIState.INDEXING: [CLIState.MAIN_MENU],
     CLIState.FILE_SELECTION: [CLIState.ACTION_SELECTION, CLIState.MAIN_MENU],
-    CLIState.ACTION_SELECTION: [CLIState.EXECUTION, CLIState.FILE_SELECTION, CLIState.MAIN_MENU],
+    CLIState.ACTION_SELECTION: [
+        CLIState.EXECUTION,
+        CLIState.FILE_SELECTION,
+        CLIState.MAIN_MENU,
+    ],
     CLIState.EXECUTION: [CLIState.MAIN_MENU],
     CLIState.VIEW_LOGS: [CLIState.MAIN_MENU],
     CLIState.CONFIGURE: [CLIState.MAIN_MENU],
@@ -76,6 +80,9 @@ ALLOWED_TRANSITIONS = {
 
 current_state = CLIState.INIT
 
+
+# Single source of state truth - should only allow valid states
+# - [ ] TODO: use math to validate by generating random states using monte carlo
 def update_state(new_state: str):
     global current_state
     if new_state in ALLOWED_TRANSITIONS[current_state]:
@@ -84,140 +91,143 @@ def update_state(new_state: str):
     else:
         console.print(f"[red]Invalid transition: {current_state} → {new_state}[/red]")
 
-# =============================
-# Stage 1 – Helpers for indexing
-# =============================
 
-def hash_file(file_path: Path) -> str:
-    """Compute SHA256 hash of a file to detect changes."""
+# ----------------------------
+# Model / File Indexing
+# ----------------------------
+# - [ ] TODO: annotate using typing for mypy
+FILE_STATE = {
+    "files": [],
+    "dirs": [],
+    "hashes": {},
+}
+
+
+def hash_file(path: Path) -> str:
+    """Return SHA256 hash of file contents."""
     h = hashlib.sha256()
-    with open(file_path, "rb") as f:
-        for chunk in iter(lambda: f.read(8192), b""):
-            h.update(chunk)
+    h.update(path.read_bytes())
     return h.hexdigest()
 
 
-def load_hashes() -> dict[str, str]:
-    """Load previously saved file hashes, or return empty dict."""
-    if HASH_FILE.exists():
-        return json.loads(HASH_FILE.read_text())
-    return {}
+def validate_files(input: Iterator[Path]) -> Generator[Path, None, None]:
+    """Filter out non-files and hidden files."""
+    for i in tdqm(input, desc="Validating files"):
+        if i.is_file() and not i.name.startswith("."):
+            yield i
 
 
-def save_hashes(hashes: dict[str, str]):
-    """Save file hashes for next run."""
-    HASH_FILE.write_text(json.dumps(hashes, indent=2))
+def list_project_files(base: Path = Path(".")) -> List[Path]:
+    """Return all files in the project (non-hidden)."""
+    exclude = [".toml", ".md"]
+    return sorted(p for p in validate_files(base.rglob("*")) if p.suffix not in exclude)
 
 
-def list_project_files(base: Path = Path(".")) -> list[Path]:
-    """Return sorted list of all project files, excluding hidden files."""
-    return sorted([p for p in base.rglob("*") if p.is_file() and not p.name.startswith(".")])
-
-
-def index_files(base: Path = Path("."), force: bool = False) -> list[Path]:
-    """
-    Index project files smartly:
-    - Only new or changed files are included unless force=True
-    - Saves updated hash state
-    - Stores index as Parquet for persistent state
-    """
-    console.rule("[bold cyan]📦 Indexing the realm[/bold cyan]")
-    files = list_project_files(base)
-    previous_hashes = load_hashes()
-    updated_hashes = {}
-    indexed_files = []
+def index_files(force: bool = False):
+    """Index files only if new or changed."""
+    update_state(CLIState.INDEXING)
+    files = list_project_files()
+    updated = False
 
     for f in tqdm(files, desc="Indexing files"):
-        h = hash_file(f)
-        updated_hashes[str(f)] = h
-        if force or previous_hashes.get(str(f)) != h:
-            indexed_files.append(f)
+        file_hash = hash_file(f)
+        if f not in FILE_STATE["hashes"] or FILE_STATE["hashes"][f] != file_hash:
+            FILE_STATE["hashes"][f] = file_hash
+            updated = True
 
-    save_hashes(updated_hashes)
+    FILE_STATE["files"] = files
+    FILE_STATE["dirs"] = sorted(set(p.parent for p in files))
 
-    # Save to Parquet
-    df = pd.DataFrame({"files": [str(f) for f in indexed_files]})
-    table = pa.Table.from_pandas(df)
-    pq.write_table(table, INDEX_FILE)
-    return indexed_files
+    if updated or force:
+        table = pa.Table.from_pandas(pd.DataFrame(FILE_STATE))
+        pq.write_table(table, INDEX_FILE)
+        console.print(f"[green]Index updated with {len(files)} files.[/green]")
+    else:
+        console.print("[yellow]Index is up-to-date.[/yellow]")
 
 
-# =============================
-# Stage 2 – Action functions
-# =============================
-
-def run_with_marimo(path: str) -> None:
-    """Run a Python file using Marimo."""
+# ----------------------------
+# Action functions
+# ----------------------------
+def run_with_marimo(path: str):
     subprocess.run(["marimo", "run", path])
 
 
-def open_in_vscode(path: str) -> None:
-    """Open a file in VSCode."""
+def open_in_vscode(path: str):
     subprocess.run(["code", path])
 
 
-def print_contents(path: str) -> None:
-    """Print file contents to the console."""
+def print_contents(path: str):
     text = Path(path).read_text()
     console.rule(f"[green]{path}")
     console.print(text)
 
 
-# =============================
-# Stage 3 – CLI interaction
-# =============================
+# ----------------------------
+# View / Menu
+# ----------------------------
+def main_menu():
+    update_state(CLIState.MAIN_MENU)
+    choices = {
+        "Index / explore files": index_files,
+        "Select a file to act on": file_selection_menu,
+        "View logs": lambda: console.print(FILE_STATE),
+        "Configure options": lambda: console.print("Configuration TBD"),
+        "Quit": lambda: update_state(CLIState.EXIT),
+    }
 
-@app.command()
-def run(force_index: bool = typer.Option(False, "--force", "-f", help="Force reindex all files")) -> None:
-    """
-    Open the hero's console:
-    1. Smart indexing (only new/changed files unless --force)
-    2. Select a file to perform a quest on
-    3. Choose action: Marimo, VSCode, print contents
-    """
+    choice = inquirer.select(
+        message="Choose your quest:", choices=list(choices.keys()), pointer="🗡️ "
+    ).execute()
 
-    # Stage 1: Smart indexing
-    files = index_files(force=force_index)
-    if not files:
-        console.print("[red]No files found to quest on.[/red]")
-        raise typer.Exit()
+    action = choices[choice]
+    action()
+    if current_state != CLIState.EXIT:
+        main_menu()  # Loop back to main menu
 
-    # Stage 2: File selection
+
+def file_selection_menu():
+    update_state(CLIState.FILE_SELECTION)
+    if not FILE_STATE["files"]:
+        console.print("[red]No files indexed! Run indexing first.[/red]")
+        return
+
     file_choice = inquirer.select(
-        message="Select a file to quest on:",
-        choices=[str(f) for f in files],
+        message="Select a file:",
+        choices=[str(f) for f in FILE_STATE["files"]],
         pointer="🗡️ ",
-        vi_mode=True,
     ).execute()
 
-    # Stage 3: Choose action
-    action = inquirer.select(
-        message=f"What shall the hero do with '{file_choice}'?",
-        choices=["Run with Marimo", "Open in VSCode", "Print contents", "Cancel"],
+    update_state(CLIState.ACTION_SELECTION)
+    action_choice = inquirer.select(
+        message=f"What do you want to do with '{file_choice}'?",
+        choices=["Run with marimo", "Open in VSCode", "Print contents", "Cancel"],
+        pointer="🗡️ ",
     ).execute()
 
-    if action == "Cancel":
+    if action_choice == "Cancel":
         console.print("[yellow]Quest abandoned.[/yellow]")
         return
 
-    # Stage 4: Optional progress animation
-    for _ in track(range(3), description=f"{action}..."):
-        pass
-
-    # Stage 5: Execute action
-    actions = {
-        "Run with Marimo": run_with_marimo,
+    action_map = {
+        "Run with marimo": run_with_marimo,
         "Open in VSCode": open_in_vscode,
         "Print contents": print_contents,
     }
-    func = actions.get(action)
-    if func:
-        func(file_choice)
+
+    update_state(CLIState.EXECUTION)
+    action_map[action_choice](file_choice)
 
 
-# =============================
-# Stage 4 – Entry point
-# =============================
+# ----------------------------
+# CLI entrypoint
+# ----------------------------
+@app.command()
+def run():
+    update_state(CLIState.INIT)
+    console.print("[bold cyan]🎮 Welcome to LeetCode Hero![/bold cyan]")
+    main_menu()
+
 
 if __name__ == "__main__":
     app()
