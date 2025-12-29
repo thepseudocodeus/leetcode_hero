@@ -17,11 +17,24 @@ Notes:
 """
 
 import subprocess
+import shutil
+import sys
 
 
 def main():
-    cmd = ["uv", "run", "python3", "-m", "scripts.cli", "run"]
-    subprocess.run(cmd)
+    # Decide whether to use 'uv run' or just 'python3'
+    has_uv = shutil.which("uv")
+    base_cmd = ["python3", "-m", "scripts.cli"]
+    cmd = ["uv", "run"] + base_cmd if has_uv else base_cmd
+
+    # Forward any CLI args to Typer
+    if len(sys.argv) > 1:
+        cmd += sys.argv[1:]
+
+    print(f"🚀 Launching LeetCode Hero via: {' '.join(cmd)}")
+    result = subprocess.run(cmd)
+    if result.returncode != 0:
+        print(f"⚠️  CLI exited with code {result.returncode}")
 
 
 if __name__ == "__main__":

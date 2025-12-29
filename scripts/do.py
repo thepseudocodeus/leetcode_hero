@@ -1,4 +1,4 @@
-# scripts/actions.py
+# scripts/do.py
 """
 Actions for CLI
 
