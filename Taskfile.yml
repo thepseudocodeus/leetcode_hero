@@ -90,4 +90,4 @@ tasks:
   pyr:
     desc: Run Python code
     cmds:
-      - uv run --reload python3 -m main
+      - uv run python3 -m main

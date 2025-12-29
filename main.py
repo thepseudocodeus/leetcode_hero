@@ -20,7 +20,7 @@ import subprocess
 
 
 def main():
-    cmd = ["uv", "run", "python3", "-m", "scripts.cli"]
+    cmd = ["uv", "run", "python3", "-m", "scripts.cli", "run"]
     subprocess.run(cmd)
 
 
