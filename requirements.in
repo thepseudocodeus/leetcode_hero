@@ -1,0 +1,14 @@
+mypy
+pytest
+pydantic
+ruff
+marimo
+numpy
+pandas
+polars
+pyarrow
+marimo[recommended]
+inquirerpy
+typer
+rich
+tdqm

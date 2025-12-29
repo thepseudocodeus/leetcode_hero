@@ -1,0 +1,77 @@
+version: "3"
+
+vars:
+  PYTHON_VERSION: 3
+  FILEPATH: "story/"
+
+tasks:
+  default:
+    desc: Show tasks
+    cmds:
+      - task -a
+    silent: true
+
+  web-init:
+    desc: Initialize the web server
+    cmds:
+      - cd web && mix ecto.create && mix ecto.migrate && mix phx.server
+
+  py-init:
+    desc: Initialize Python environment with uv
+    cmds:
+      # - uv sync --python {{.PYTHON_VERSION}}
+      - uv python install {{.PYTHON_VERSION}}
+      - uv pip compile requirements.in -o requirements.txt
+      - uv add -r requirements.txt
+      - uv sync
+
+  story-init:
+    desc: Create the story environment for this product
+    cmds:
+      - mkdir story
+      - mkdir -p story/{prologue,appendix,epilogue,chapters}
+      - touch story/appendix/{character_glossary.py,map_of_world.py,summary.py}
+      - touch story/prologue/{1-ordinary_world.py,2-call_to_adventure.py,3-refusal_of_the_call.py}
+      - touch story/epilogue/{return_home.py,new_normal.py}
+      - touch story/chapters/{8-ordeal_resurrection.py,4-meeting_mentor.py,5-crossing_threshold.py,6-test_trials_allies.py,7-approach_inmost_cave.py}
+      - touch story/chapters/{9-reward.py,10-road_back.py,11-resurrection.py,12-return_home.py,13-new_normal.py}
+
+  py-update:
+    desc: Update all Python dependencies
+    cmds:
+      - uv pip compile --upgrade requirements.in -o requirements.txt
+      - uv sync
+
+  py-clean:
+    desc: Clean Python environment and rebuild
+    cmds:
+      - rm -rf .venv __pycache__
+      - uv venv
+      - uv sync
+
+  py-lint:
+    desc: Run Python linters
+    cmds:
+      - uv run ruff check .
+      - uv run ruff format --check .
+
+  hero:
+    desc: Run leetcode hero rust app
+    cmds:
+      - cd leetcode_hero && cargo run
+
+  all-init:
+    desc: Initialize all project environments
+    cmds:
+      - task: py-init
+      - task: web-init
+
+  run-marimo:
+    desc: Run marimo
+    cmds:
+      - uv run marimo run {{.FILEPATH}}
+
+  py-format:
+    desc: Format Python code
+    cmds:
+      - uv run ruff format
